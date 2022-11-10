@@ -67,7 +67,7 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                     "http-thread-pool", // thread pool name
                     THREAD_POOL_SIZE,         // thread pool size
                     true)
-                    .onClient(false))
+                    .onClient(false)) // we use our custom event loop here, disable the native one
                 .build();
 
             //============================================================
