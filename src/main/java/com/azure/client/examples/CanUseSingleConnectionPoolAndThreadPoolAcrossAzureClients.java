@@ -29,7 +29,9 @@ import java.time.Duration;
 public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
 
     private static final int MAX_CONNECTION_POOL_SIZE = 10;
+    private static final int THREAD_POOL_SIZE = 100;
     private static final int CLIENT_COUNT = 100;
+    private static final int PENDING_ACQUIRE_CONNECTION_COUNT = 500;
 
     public static boolean runSample() {
         Region region = Region.US_EAST;
@@ -53,15 +55,19 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                         .maxConnections(MAX_CONNECTION_POOL_SIZE)
                         // When the maximum number of channels in the pool is reached, up to specified new attempts to
                         // acquire a channel are delayed (pending) until a channel is returned to the pool again, and further attempts are declined with an error.
-                        .pendingAcquireMaxCount(CLIENT_COUNT)
+                        .pendingAcquireMaxCount(PENDING_ACQUIRE_CONNECTION_COUNT)
                         .maxIdleTime(Duration.ofSeconds(20)) // Configures the maximum time for a connection to stay idle to 20 seconds.
                         .maxLifeTime(Duration.ofSeconds(60)) // Configures the maximum time for a connection to stay alive to 60 seconds.
-                        .pendingAcquireTimeout(Duration.ofSeconds(10)) // Configures the maximum time for the pending acquire operation to 60 seconds.
+                        .pendingAcquireTimeout(Duration.ofSeconds(60)) // Configures the maximum time for the pending acquire operation to 60 seconds.
                         .evictInBackground(Duration.ofSeconds(120)) // Every two minutes, the connection pool is regularly checked for connections that are applicable for removal.
                         .metrics(true, () -> customMetricsRegistrar) // Enable pool metrics.
                         .build())
                 // Thread pool configuration.
-                .eventLoopGroup(LoopResources.create("http-thread-pool", MAX_CONNECTION_POOL_SIZE, CLIENT_COUNT, true).onClient(false))
+                .eventLoopGroup(LoopResources.create(
+                    "http-thread-pool", // thread pool name
+                    THREAD_POOL_SIZE,         // thread pool size
+                    true)
+                    .onClient(false))
                 .build();
 
             //============================================================
