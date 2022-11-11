@@ -18,6 +18,7 @@ import reactor.netty.resources.LoopResources;
 
 import java.net.SocketAddress;
 import java.time.Duration;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * Can use a single HttpClient across different azure clients, thus reusing same connection pool.
@@ -35,11 +36,6 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
 
     public static boolean runSample() {
         Region region = Region.US_EAST;
-
-        final AzureProfile profile = new AzureProfile(AzureEnvironment.AZURE);
-        final TokenCredential credential = new DefaultAzureCredentialBuilder()
-            .authorityHost(profile.getEnvironment().getActiveDirectoryEndpoint())
-            .build();
 
         try {
             CustomMetricsRegistrar customMetricsRegistrar = new CustomMetricsRegistrar();
@@ -63,15 +59,24 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                         .metrics(true, () -> customMetricsRegistrar) // Enable pool metrics.
                         .build())
                 // Thread pool configuration.
-                .eventLoopGroup(LoopResources.create(
-                    "http-thread-pool", // thread pool name
-                    THREAD_POOL_SIZE,         // thread pool size
-                    true)
-                    .onClient(false)) // we use our custom event loop here, disable the native one
+                .eventLoopGroup(LoopResources
+                        .create(
+                                "client-thread-pool", // thread pool name
+                                THREAD_POOL_SIZE,           // thread pool size
+                                true)
+                        // we use our custom event loop here, disable the native one
+                        .onClient(false))
                 .build();
 
             //============================================================
             // Create 100 azure clients with the same NettyHttpClient.
+            final AzureProfile profile = new AzureProfile(AzureEnvironment.AZURE);
+            final TokenCredential credential = new DefaultAzureCredentialBuilder()
+                    .authorityHost(profile.getEnvironment().getActiveDirectoryEndpoint())
+                    .executorService(ForkJoinPool.commonPool()) // thread pool for executing token acquisition
+                    .httpClient(httpClient)
+                    .build();
+
             Flux<ComputeUsage>[] usageFluxArray = new Flux[CLIENT_COUNT];
             for (int i = 0; i < CLIENT_COUNT; i++) {
                 AzureResourceManager azureResourceManager = AzureResourceManager
