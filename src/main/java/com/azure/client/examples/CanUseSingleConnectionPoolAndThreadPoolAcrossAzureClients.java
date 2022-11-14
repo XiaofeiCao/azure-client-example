@@ -12,36 +12,31 @@ import com.azure.resourcemanager.AzureResourceManager;
 import com.azure.resourcemanager.compute.models.ComputeUsage;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
-import reactor.netty.resources.ConnectionPoolMetrics;
 import reactor.netty.resources.ConnectionProvider;
 import reactor.netty.resources.LoopResources;
 
-import java.net.SocketAddress;
 import java.time.Duration;
-import java.util.concurrent.ForkJoinPool;
 
 /**
  * Can use a single HttpClient across different azure clients, thus reusing same connection pool.
- * - Create NettyHttpClient with connection pool size 10 and thread pool size equal to client size 100.
+ * - Create NettyHttpClient with connection pool size 500 and thread pool size 1000;
  * - Create 100 azure clients with the same NettyHttpClient.
  * - Make 100 concurrent calls using azure clients.
- * - Observe that connection pool is exhausted.
  */
 public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
 
-    private static final int MAX_CONNECTION_POOL_SIZE = 10;
-    private static final int THREAD_POOL_SIZE = 100;
+    private static final int MAX_CONNECTION_POOL_SIZE = 500;
+    private static final int PENDING_ACQUIRE_CONNECTION_COUNT = 1000;
+    private static final int THREAD_POOL_SIZE = 1000;
     private static final int CLIENT_COUNT = 100;
-    private static final int PENDING_ACQUIRE_CONNECTION_COUNT = 500;
 
     public static boolean runSample() {
         Region region = Region.US_EAST;
 
         try {
-            CustomMetricsRegistrar customMetricsRegistrar = new CustomMetricsRegistrar();
 
             //============================================================
-            // Create NettyHttpClient with connection pool size 10 and thread pool size 100.
+            // Create NettyHttpClient with connection pool size 500 and thread pool size 1000.
             HttpClient httpClient = new NettyAsyncHttpClientBuilder()
                 // Connection pool configuration.
                 .connectionProvider(
@@ -56,7 +51,6 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                         .maxLifeTime(Duration.ofSeconds(60)) // Configures the maximum time for a connection to stay alive to 60 seconds.
                         .pendingAcquireTimeout(Duration.ofSeconds(60)) // Configures the maximum time for the pending acquire operation to 60 seconds.
                         .evictInBackground(Duration.ofSeconds(120)) // Every two minutes, the connection pool is regularly checked for connections that are applicable for removal.
-                        .metrics(true, () -> customMetricsRegistrar) // Enable pool metrics.
                         .build())
                 // Thread pool configuration.
                 .eventLoopGroup(LoopResources
@@ -73,7 +67,7 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
             final AzureProfile profile = new AzureProfile(AzureEnvironment.AZURE);
             final TokenCredential credential = new DefaultAzureCredentialBuilder()
                     .authorityHost(profile.getEnvironment().getActiveDirectoryEndpoint())
-                    .executorService(ForkJoinPool.commonPool()) // thread pool for executing token acquisition
+//                    .executorService(ForkJoinPool.commonPool()) // thread pool for executing token acquisition, usually we leave it as default
                     .httpClient(httpClient)
                     .build();
 
@@ -97,10 +91,7 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
             // Make concurrent calls and wait for concurrent calls to finish.
             Flux.merge(usageFluxArray).blockLast();
 
-            //============================================================
-            // Observe that connection pool is exhausted.
-            return customMetricsRegistrar.metrics.maxAllocatedSize() == MAX_CONNECTION_POOL_SIZE // max size
-                && customMetricsRegistrar.metrics.allocatedSize() == MAX_CONNECTION_POOL_SIZE; // exhuasted all connections
+            return true;
         } catch (Exception e) {
             e.printStackTrace();
             return false;
@@ -110,14 +101,6 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
     public static void main(String[] args) {
         if (!runSample()) {
             throw new IllegalStateException("Sample run failed.");
-        }
-    }
-
-    private static class CustomMetricsRegistrar implements ConnectionProvider.MeterRegistrar {
-        private ConnectionPoolMetrics metrics;
-        @Override
-        public void registerMetrics(String s, String s1, SocketAddress socketAddress, ConnectionPoolMetrics connectionPoolMetrics) {
-            metrics = connectionPoolMetrics;
         }
     }
 }
