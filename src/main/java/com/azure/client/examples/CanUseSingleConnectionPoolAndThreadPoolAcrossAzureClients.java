@@ -53,6 +53,7 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                         .evictInBackground(Duration.ofSeconds(120)) // Every two minutes, the connection pool is regularly checked for connections that are applicable for removal.
                         .build())
                 // Thread pool configuration.
+                // If not specified, thread pool size fallback to available processor count (but with a minimum value of 4)
                 .eventLoopGroup(LoopResources
                         .create(
                                 "client-thread-pool", // thread pool name
@@ -68,7 +69,7 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
             final TokenCredential credential = new DefaultAzureCredentialBuilder()
                     .authorityHost(profile.getEnvironment().getActiveDirectoryEndpoint())
 //                    .executorService(ForkJoinPool.commonPool()) // thread pool for executing token acquisition, usually we leave it as default
-                    .httpClient(httpClient)
+                    .httpClient(httpClient) //
                     .build();
 
             Flux<ComputeUsage>[] usageFluxArray = new Flux[CLIENT_COUNT];
