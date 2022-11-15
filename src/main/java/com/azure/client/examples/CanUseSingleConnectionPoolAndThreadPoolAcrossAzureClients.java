@@ -10,6 +10,7 @@ import com.azure.core.management.profile.AzureProfile;
 import com.azure.identity.DefaultAzureCredentialBuilder;
 import com.azure.resourcemanager.AzureResourceManager;
 import com.azure.resourcemanager.compute.models.ComputeUsage;
+import io.netty.util.NettyRuntime;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 import reactor.netty.resources.ConnectionProvider;
@@ -27,7 +28,7 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
 
     private static final int MAX_CONNECTION_POOL_SIZE = 500;
     private static final int PENDING_ACQUIRE_CONNECTION_COUNT = 1000;
-    private static final int THREAD_POOL_SIZE = 1000;
+    private static final int THREAD_POOL_SIZE = NettyRuntime.availableProcessors() * 2;
     private static final int CLIENT_COUNT = 100;
 
     public static boolean runSample() {
@@ -39,6 +40,7 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
             // Create NettyHttpClient with connection pool size 500 and thread pool size 1000.
             HttpClient httpClient = new NettyAsyncHttpClientBuilder()
                 // Connection pool configuration.
+                // Official Reactor Netty documentation for defaults: https://projectreactor.io/docs/netty/release/reference/#_connection_pool_2
                 .connectionProvider(
                     ConnectionProvider.builder("connection-pool")
                         // By default, HttpClient uses a “fixed” connection pool with 500 as the maximum number of active channels
@@ -53,7 +55,7 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                         .evictInBackground(Duration.ofSeconds(120)) // Every two minutes, the connection pool is regularly checked for connections that are applicable for removal.
                         .build())
                 // Thread pool configuration.
-                // If not specified, thread pool size fallback to available processor count (but with a minimum value of 4)
+                // Official Reactor Netty documentation for defaults: https://projectreactor.io/docs/netty/release/reference/#client-tcp-level-configurations-event-loop-group
                 .eventLoopGroup(LoopResources
                         .create(
                                 "client-thread-pool", // thread pool name
