@@ -17,6 +17,7 @@ import reactor.netty.resources.ConnectionProvider;
 import reactor.netty.resources.LoopResources;
 
 import java.time.Duration;
+import java.util.function.Function;
 
 /**
  * Can use a single HttpClient across different azure clients, thus reusing same connection pool.
@@ -88,7 +89,11 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                 // Construct 100 concurrent calls using azure clients for later use.
                 usageFluxArray[i] = azureResourceManager.computeUsages()
                     .listByRegionAsync(region)
-                    .subscribeOn(Schedulers.boundedElastic());
+                    .publishOn(Schedulers.boundedElastic())
+                .map(computeUsage -> {
+                    System.out.println(Thread.currentThread().getName());
+                    return computeUsage;
+                });
             }
             //============================================================
             // Make concurrent calls and wait for concurrent calls to finish.
