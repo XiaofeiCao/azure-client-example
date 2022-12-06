@@ -2,8 +2,12 @@ package com.azure.client.examples;
 
 import com.azure.core.credential.TokenCredential;
 import com.azure.core.http.HttpClient;
+import com.azure.core.http.HttpResponse;
 import com.azure.core.http.netty.NettyAsyncHttpClientBuilder;
+import com.azure.core.http.policy.ExponentialBackoff;
+import com.azure.core.http.policy.ExponentialBackoffOptions;
 import com.azure.core.http.policy.HttpLogDetailLevel;
+import com.azure.core.http.policy.RetryPolicy;
 import com.azure.core.management.AzureEnvironment;
 import com.azure.core.management.Region;
 import com.azure.core.management.profile.AzureProfile;
@@ -17,7 +21,7 @@ import reactor.netty.resources.ConnectionProvider;
 import reactor.netty.resources.LoopResources;
 
 import java.time.Duration;
-import java.util.function.Function;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * Can use a single HttpClient across different azure clients, thus reusing same connection pool.
@@ -28,14 +32,16 @@ import java.util.function.Function;
 public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
 
     private static final int MAX_CONNECTION_POOL_SIZE = 500;
-    private static final int PENDING_ACQUIRE_CONNECTION_COUNT = 1000;
+    private static final int PENDING_ACQUIRE_CONNECTION_COUNT = 5000;
     private static final int THREAD_POOL_SIZE = NettyRuntime.availableProcessors() * 2;
-    private static final int CLIENT_COUNT = 100;
+    private static final int CLIENT_COUNT = 5000;
 
     public static boolean runSample() {
         Region region = Region.US_EAST;
 
         try {
+
+            System.setProperty("AZURE_ENABLE_HTTP_CLIENT_SHARING", "true");
 
             //============================================================
             // Create NettyHttpClient with connection pool size 500 and thread pool size 1000.
@@ -70,17 +76,27 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
             // Create 100 azure clients with the same NettyHttpClient.
             final AzureProfile profile = new AzureProfile(AzureEnvironment.AZURE);
             final TokenCredential credential = new DefaultAzureCredentialBuilder()
-                    .authorityHost(profile.getEnvironment().getActiveDirectoryEndpoint())
-//                    .executorService(ForkJoinPool.commonPool()) // thread pool for executing token acquisition, usually we leave it as default
-                    .httpClient(httpClient) //
-                    .build();
+                .authorityHost(profile.getEnvironment().getActiveDirectoryEndpoint())
+                .executorService(ForkJoinPool.commonPool()) // thread pool for executing token acquisition, usually we leave it default
+                .httpClient(httpClient) //
+                .build();
 
             Flux<ComputeUsage>[] usageFluxArray = new Flux[CLIENT_COUNT];
             for (int i = 0; i < CLIENT_COUNT; i++) {
                 AzureResourceManager azureResourceManager = AzureResourceManager
                     .configure()
-                    .withLogLevel(HttpLogDetailLevel.BASIC)
+                    .withLogLevel(HttpLogDetailLevel.BODY_AND_HEADERS)
                     .withHttpClient(httpClient)
+                    .withRetryPolicy(new RetryPolicy(new ExponentialBackoff(new ExponentialBackoffOptions().setMaxRetries(0)) {
+                        @Override
+                        public boolean shouldRetry(HttpResponse httpResponse) {
+                            // For example case, do not retry for TooManyRequest exception.
+                            if (429 == httpResponse.getStatusCode()) {
+                                return false;
+                            }
+                            return super.shouldRetry(httpResponse);
+                        }
+                    }))
                     .authenticate(credential, profile)
                     // withSubscription(subscriptionId) can be used to specify different subscriptions, here use default for simplicity
                     .withDefaultSubscription();
@@ -88,16 +104,19 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                 //============================================================
                 // Construct 100 concurrent calls using azure clients for later use.
                 usageFluxArray[i] = azureResourceManager.computeUsages()
-                    .listByRegionAsync(region)
-                    .publishOn(Schedulers.boundedElastic())
-                .map(computeUsage -> {
-                    System.out.println(Thread.currentThread().getName());
-                    return computeUsage;
-                });
+                    .listByRegionAsync(region);
             }
+
+            // This is for the separation between idle and working condition.
+            new Thread("baseline-thread").start();
+            Thread.sleep(1000 * 10);
+            // End of idle condition.
+
             //============================================================
             // Make concurrent calls and wait for concurrent calls to finish.
+            // This is the start of the working condition.
             Flux.merge(usageFluxArray).blockLast();
+            // End of working condition.
 
             return true;
         } catch (Exception e) {
