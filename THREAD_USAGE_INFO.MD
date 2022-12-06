@@ -1,6 +1,6 @@
 # Thread usage info in test
 
-We used test `CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients.main` to simulate application running with 5000 Azure clients.
+We used test [`CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients.main`](https://github.com/XiaofeiCao/azure-client-example/blob/main/src/main/java/com/azure/client/examples/CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients.java) to simulate application running with 5000 Azure clients.
 We also used [JFR](https://docs.oracle.com/javacomponents/jmc-5-4/jfr-runtime-guide/about.htm#JFRUH170) to record the thread usage info during our test running.
 
 We deliberately added the following code to separate two simulated states in application, idle and running.
