@@ -21,16 +21,19 @@ We sorted the thread record by thread start time. The threads are displayed in c
 
 #### Explanation
 
-Before `baseline-thread` kicks in, we constructed 5000 clients with a single HttpClient. You can see the thread pool threads（client-thread-pool-nio-xx) are eagerly started with 32 threads (twice the available processor count, configured in code)
+Before `baseline-thread` kicks in, we constructed 5000 clients with a single HttpClient. You can see the thread pool threads with name `client-thread-pool-nio-xx` are eagerly started with 16 threads (available processor count, configured in code)
+
+Ignore JVM native threads, e.g. threads that start with "C1 compiler" and "C2 compiler" belong to JIT compiler.
 
 ### Running state
+
 ![img_1.png](img_1.png)
 
 #### Explanation
 
 After `baseline-thread` (notice the 10 seconds difference), we are doing actual API calls, and Azure Identity thread pool starts(ForkJoinPool.commonPool-worker-xx), with total 15 threads(available processor count -1, default by ForkJoinPool.commonPool()).
 
-Finally, there are threads(parallel-x), caused by `Flux.blockLast`, which uses `Schedulers.parallel()` of 16 threads in total(available processor count).
+Finally, there are threads with name `parallel-`, on which we subscribe the Flux by default, which uses `Schedulers.parallel()` of 16 threads in total(available processor count).
 
 ## Thread pool and connection pool guidance:
 

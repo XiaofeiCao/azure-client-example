@@ -16,11 +16,11 @@ import com.azure.resourcemanager.AzureResourceManager;
 import com.azure.resourcemanager.compute.models.ComputeUsage;
 import io.netty.util.NettyRuntime;
 import reactor.core.publisher.Flux;
-import reactor.core.scheduler.Schedulers;
 import reactor.netty.resources.ConnectionProvider;
 import reactor.netty.resources.LoopResources;
 
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
 
 /**
@@ -33,16 +33,18 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
 
     private static final int MAX_CONNECTION_POOL_SIZE = 500;
     private static final int PENDING_ACQUIRE_CONNECTION_COUNT = 5000;
-    private static final int THREAD_POOL_SIZE = NettyRuntime.availableProcessors() * 2;
+    private static final int THREAD_POOL_SIZE = NettyRuntime.availableProcessors();
     private static final int CLIENT_COUNT = 5000;
+    private static final int REACTOR_POOL_SIZE = NettyRuntime.availableProcessors();
+
+    static {
+        System.setProperty("reactor.schedulers.defaultPoolSize", REACTOR_POOL_SIZE + "");
+    }
 
     public static boolean runSample() {
         Region region = Region.US_EAST;
 
         try {
-
-            System.setProperty("AZURE_ENABLE_HTTP_CLIENT_SHARING", "true");
-
             //============================================================
             // Create NettyHttpClient with connection pool size 500 and thread pool size 1000.
             HttpClient httpClient = new NettyAsyncHttpClientBuilder()
@@ -81,13 +83,14 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                 .httpClient(httpClient) //
                 .build();
 
+            CountDownLatch countDownLatch = new CountDownLatch(CLIENT_COUNT);
             Flux<ComputeUsage>[] usageFluxArray = new Flux[CLIENT_COUNT];
             for (int i = 0; i < CLIENT_COUNT; i++) {
                 AzureResourceManager azureResourceManager = AzureResourceManager
                     .configure()
                     .withLogLevel(HttpLogDetailLevel.BODY_AND_HEADERS)
                     .withHttpClient(httpClient)
-                    .withRetryPolicy(new RetryPolicy(new ExponentialBackoff(new ExponentialBackoffOptions().setMaxRetries(0)) {
+                    .withRetryPolicy(new RetryPolicy(new ExponentialBackoff(new ExponentialBackoffOptions()) {
                         @Override
                         public boolean shouldRetry(HttpResponse httpResponse) {
                             // For example case, do not retry for TooManyRequest exception.
@@ -104,7 +107,8 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
                 //============================================================
                 // Construct 100 concurrent calls using azure clients for later use.
                 usageFluxArray[i] = azureResourceManager.computeUsages()
-                    .listByRegionAsync(region);
+                    .listByRegionAsync(region)
+                    .doFinally(sig -> countDownLatch.countDown());
             }
 
             // This is for the separation between idle and working condition.
@@ -115,7 +119,11 @@ public class CanUseSingleConnectionPoolAndThreadPoolAcrossAzureClients {
             //============================================================
             // Make concurrent calls and wait for concurrent calls to finish.
             // This is the start of the working condition.
-            Flux.merge(usageFluxArray).blockLast();
+            for (Flux<ComputeUsage> usageFlux : usageFluxArray) {
+                usageFlux.subscribe();
+            }
+
+            countDownLatch.await();
             // End of working condition.
 
             return true;
